@@ -1,5 +1,6 @@
 import os
 import uuid
+from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
 
@@ -7,6 +8,8 @@ import fitz
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastembed import TextEmbedding
+from llama_index.core.retrievers import BaseRetriever
+from llama_index.core.schema import MetadataMode, NodeWithScore, QueryBundle, TextNode
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient, models
 
@@ -59,6 +62,36 @@ class SimilarityRequest(BaseModel):
     documents: list[str] = Field(min_length=1, max_length=20)
 
 
+class BrandDNAQdrantRetriever(BaseRetriever):
+    """LlamaIndex orchestration over the existing BrandDNA Qdrant schema."""
+
+    def __init__(self, brand_id: str, kind: str | None, limit: int) -> None:
+        super().__init__()
+        self.brand_id = brand_id
+        self.kind = kind
+        self.limit = limit
+
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        query_vector = list(get_embedder().query_embed(query_bundle.query_str))[0].tolist()
+        conditions = [models.FieldCondition(key="brand_id", match=models.MatchValue(value=self.brand_id))]
+        if self.kind:
+            conditions.append(models.FieldCondition(key="kind", match=models.MatchValue(value=self.kind)))
+        hits = qdrant.query_points(
+            COLLECTION,
+            query=query_vector,
+            query_filter=models.Filter(must=conditions),
+            limit=self.limit,
+            with_payload=True,
+        ).points
+        nodes: list[NodeWithScore] = []
+        for hit in hits:
+            payload = hit.payload or {}
+            metadata = {key: value for key, value in payload.items() if key != "text"}
+            node = TextNode(id_=str(hit.id), text=str(payload.get("text", "")), metadata=metadata)
+            nodes.append(NodeWithScore(node=node, score=float(hit.score)))
+        return nodes
+
+
 @app.on_event("startup")
 def startup() -> None:
     ensure_collection()
@@ -72,6 +105,7 @@ def health() -> dict:
         "services": {
             "fastapi": {"active": True, "version": app.version},
             "qdrant": {"active": True, "mode": "embedded", "collection": COLLECTION},
+            "llamaindex": {"active": True, "version": version("llama-index-core"), "role": "retrieval orchestration"},
             "text_embeddings": {"active": True, "model": MODEL_NAME, "dimensions": VECTOR_SIZE},
             "pymupdf": {"active": True},
             "postgresql": {"active": bool(os.getenv("DATABASE_URL"))},
@@ -118,12 +152,10 @@ async def index_pdf(brand_id: str = Form(...), kind: Literal["brand", "competito
 @app.post("/search")
 def search(request: SearchRequest) -> dict:
     ensure_collection()
-    query_vector = list(get_embedder().query_embed(request.query))[0].tolist()
-    conditions = [models.FieldCondition(key="brand_id", match=models.MatchValue(value=request.brand_id))]
-    if request.kind:
-        conditions.append(models.FieldCondition(key="kind", match=models.MatchValue(value=request.kind)))
-    hits = qdrant.query_points(COLLECTION, query=query_vector, query_filter=models.Filter(must=conditions), limit=request.limit, with_payload=True).points
-    return {"matches": [{"score": round(float(hit.score), 4), **(hit.payload or {})} for hit in hits], "model": MODEL_NAME}
+    retriever = BrandDNAQdrantRetriever(request.brand_id, request.kind, request.limit)
+    nodes = retriever.retrieve(request.query)
+    matches = [{"score": round(float(item.score or 0), 4), **item.node.metadata, "text": item.node.get_content(metadata_mode=MetadataMode.NONE)} for item in nodes]
+    return {"matches": matches, "model": MODEL_NAME, "retriever": "llamaindex"}
 
 
 @app.post("/similarity")
