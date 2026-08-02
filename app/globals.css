@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root { --background: #f6f7fb; --foreground: #151931; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, Helvetica, sans-serif; font-size: 17px; line-height: 1.55; }
+button { cursor: pointer; }
+.font-serif { font-family: Georgia, "Times New Roman", serif; }
+.section-label, .field-label { font-size: .72rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: #f36c21; }
+.field-label { color: #8b90a3; letter-spacing: .1em; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }
+.phase-tab { display: flex; min-height: 48px; flex: 1; align-items: center; justify-content: center; gap: .55rem; border-radius: .75rem; padding: .65rem .8rem; color: #697088; font-size: .92rem; font-weight: 800; transition: background .2s ease, color .2s ease, transform .2s ease; }
+.phase-tab:hover { background: #f2f4f9; color: #202a68; transform: translateY(-1px); }
+.phase-tab span { display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: 999px; background: #eef0f6; font-size: .75rem; }
+.phase-tab-active { background: #202a68; color: white; }
+.phase-tab-active:hover { background: #202a68; color: white; }
+.phase-tab-active span { background: rgba(255,255,255,.16); }
+.phase-view { animation: phase-in .32s ease both; }
+@keyframes phase-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse { 50% { opacity: .55; transform: scale(.96); } }
+.animate-pulse { animation: pulse 1.2s ease-in-out infinite; }
+@media (max-width: 640px) { body { font-size: 16px; } .phase-tab { font-size: 0; } .phase-tab span { font-size: .78rem; } }
