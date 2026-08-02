@@ -4,7 +4,8 @@ import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
 const MAX_WEB_BYTES = 1_500_000;
 const urlField = z
   .string()
@@ -655,18 +656,40 @@ export async function POST(request: Request) {
       .filter(
         (value): value is File => value instanceof File && value.size > 0,
       );
-    if (files.length > 6 || files.some((file) => file.size > MAX_FILE_SIZE))
+    const supported = files.every(
+      (file) =>
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf") ||
+        file.type.startsWith("image/") ||
+        file.type.startsWith("video/"),
+    );
+    const oversized = files.some(
+      (file) =>
+        file.size >
+        (file.type.startsWith("video/") ? MAX_VIDEO_SIZE : MAX_DOCUMENT_SIZE),
+    );
+    if (!supported)
       return Response.json(
-        { error: "Use up to 6 files, each smaller than 10 MB." },
+        { error: "Phase 1 accepts PDF, image and video files only." },
+        { status: 415 },
+      );
+    if (files.length > 6 || oversized)
+      return Response.json(
+        {
+          error:
+            "Use up to 6 files. PDFs and images must be under 10 MB; videos under 50 MB.",
+        },
         { status: 413 },
       );
     let fileText = "";
     let pages = 0;
+    const mediaAssets = { pdfs: 0, images: 0, videos: 0 };
     for (const file of files) {
       if (
         file.type === "application/pdf" ||
         file.name.toLowerCase().endsWith(".pdf")
       ) {
+        mediaAssets.pdfs++;
         const parser = new PDFParse({
           data: new Uint8Array(await file.arrayBuffer()),
         });
@@ -677,16 +700,8 @@ export async function POST(request: Request) {
         } finally {
           await parser.destroy();
         }
-      } else if (
-        /\.(txt|md)$/i.test(file.name) ||
-        file.type.startsWith("text/")
-      )
-        fileText += `\n${await file.text()}`;
-      else
-        return Response.json(
-          { error: `${file.name} is not a supported PDF or text file.` },
-          { status: 415 },
-        );
+      } else if (file.type.startsWith("image/")) mediaAssets.images++;
+      else if (file.type.startsWith("video/")) mediaAssets.videos++;
     }
 
     const brandSite = await readWebsiteFlexible(websiteInput.data);
@@ -776,6 +791,7 @@ export async function POST(request: Request) {
         chunks,
         vectors: vectorCount || chunks,
         vectorBackend: vectorCount ? "qdrant" : "fallback",
+        mediaAssets,
       },
       sources: [
         ...files.map((file) => file.name),

@@ -41,6 +41,7 @@ type Result = {
     chunks: number;
     vectors: number;
     vectorBackend?: "qdrant" | "fallback";
+    mediaAssets?: { pdfs: number; images: number; videos: number };
   };
   sources: string[];
   evidenceChunks?: string[];
@@ -105,7 +106,11 @@ const messages = {
     buildBody:
       "Turn guidelines, campaigns and a website into a structured brand profile, ranked competitor set and searchable knowledge base.",
     addSources: "Add your brand sources",
-    sourceHelp: "PDF and plain-text files · up to 6 files · 10 MB each",
+    sourceHelp:
+      "Add up to 6 brand assets: PDFs and images up to 10 MB, videos up to 50 MB.",
+    uploadPdf: "Upload PDFs",
+    uploadImage: "Upload images",
+    uploadVideo: "Upload videos",
     dropSources: "Drop guidelines or campaigns here",
     browse: "or click to browse files",
     brandWebsite: "Brand website",
@@ -183,7 +188,10 @@ const messages = {
       "दिशानिर्देशों, अभियानों और वेबसाइट को संरचित ब्रांड प्रोफ़ाइल, क्रमबद्ध प्रतिस्पर्धी समूह और खोज योग्य नॉलेज बेस में बदलें।",
     addSources: "अपने ब्रांड के स्रोत जोड़ें",
     sourceHelp:
-      "PDF और सादा टेक्स्ट फ़ाइलें · अधिकतम 6 फ़ाइलें · प्रत्येक 10 MB",
+      "अधिकतम 6 ब्रांड फ़ाइलें जोड़ें: PDF और तस्वीरें 10 MB तक, वीडियो 50 MB तक।",
+    uploadPdf: "PDF अपलोड करें",
+    uploadImage: "तस्वीरें अपलोड करें",
+    uploadVideo: "वीडियो अपलोड करें",
     dropSources: "दिशानिर्देश या अभियान यहाँ छोड़ें",
     browse: "या फ़ाइल चुनने के लिए क्लिक करें",
     brandWebsite: "ब्रांड वेबसाइट",
@@ -261,7 +269,10 @@ const messages = {
       "வழிகாட்டுதல்கள், பிரச்சாரங்கள் மற்றும் இணையதளத்தை கட்டமைக்கப்பட்ட பிராண்ட் சுயவிவரம், தரவரிசைப்படுத்தப்பட்ட போட்டியாளர் தொகுப்பு மற்றும் தேடக்கூடிய அறிவுத் தளமாக மாற்றுங்கள்.",
     addSources: "உங்கள் பிராண்ட் ஆதாரங்களைச் சேர்க்கவும்",
     sourceHelp:
-      "PDF மற்றும் சாதாரண உரைக் கோப்புகள் · அதிகபட்சம் 6 கோப்புகள் · ஒவ்வொன்றும் 10 MB",
+      "அதிகபட்சம் 6 பிராண்ட் கோப்புகளைச் சேர்க்கவும்: PDF மற்றும் படங்கள் 10 MB வரை, வீடியோக்கள் 50 MB வரை.",
+    uploadPdf: "PDF பதிவேற்றவும்",
+    uploadImage: "படங்களைப் பதிவேற்றவும்",
+    uploadVideo: "வீடியோக்களைப் பதிவேற்றவும்",
     dropSources: "வழிகாட்டுதல்கள் அல்லது பிரச்சாரங்களை இங்கே இடவும்",
     browse: "அல்லது கோப்புகளைத் தேர்ந்தெடுக்க கிளிக் செய்யவும்",
     brandWebsite: "பிராண்ட் இணையதளம்",
@@ -347,6 +358,8 @@ export default function Home() {
   });
   const t = (key: MessageKey) => messages[language][key];
   const input = useRef<HTMLInputElement>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
@@ -706,24 +719,66 @@ export default function Home() {
                       e.preventDefault();
                       addFiles(e.dataTransfer.files);
                     }}
-                    onClick={() => input.current?.click()}
-                    className="group cursor-pointer rounded-2xl border-2 border-dashed border-[#cfd3e2] bg-[#fafbfe] px-6 py-11 text-center transition hover:border-[#f36c21] hover:bg-[#fffaf7]"
+                    className="rounded-2xl border-2 border-dashed border-[#cfd3e2] bg-[#fafbfe] p-5 transition hover:border-[#f36c21] hover:bg-[#fffaf7]"
                   >
                     <input
                       ref={input}
                       type="file"
                       multiple
-                      accept=".pdf,.txt,.md"
+                      accept=".pdf,application/pdf"
                       className="hidden"
                       onChange={(e) => addFiles(e.target.files)}
                     />
-                    <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-[#fff0e7] text-[#f36c21]">
-                      <UploadCloud />
+                    <input
+                      ref={imageInput}
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => addFiles(e.target.files)}
+                    />
+                    <input
+                      ref={videoInput}
+                      type="file"
+                      multiple
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => addFiles(e.target.files)}
+                    />
+                    <div className="mb-4 text-center">
+                      <div className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-[#fff0e7] text-[#f36c21]">
+                        <UploadCloud />
+                      </div>
+                      <p className="font-bold text-[#202a68]">
+                        {t("dropSources")}
+                      </p>
                     </div>
-                    <p className="font-bold text-[#202a68]">
-                      {t("dropSources")}
-                    </p>
-                    <p className="mt-1 text-sm text-[#858a9c]">{t("browse")}</p>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        onClick={() => input.current?.click()}
+                        className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border border-[#dfe2eb] bg-white p-4 font-bold text-[#202a68] shadow-sm hover:border-[#f36c21]"
+                      >
+                        <FileText className="text-[#f36c21]" />
+                        {t("uploadPdf")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => imageInput.current?.click()}
+                        className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border border-[#dfe2eb] bg-white p-4 font-bold text-[#202a68] shadow-sm hover:border-[#f36c21]"
+                      >
+                        <FileImage className="text-[#f36c21]" />
+                        {t("uploadImage")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => videoInput.current?.click()}
+                        className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border border-[#dfe2eb] bg-white p-4 font-bold text-[#202a68] shadow-sm hover:border-[#f36c21]"
+                      >
+                        <FileVideo className="text-[#f36c21]" />
+                        {t("uploadVideo")}
+                      </button>
+                    </div>
                   </div>
                   {files.length > 0 && (
                     <div className="mt-4 space-y-2">
@@ -732,7 +787,13 @@ export default function Home() {
                           key={`${file.name}-${i}`}
                           className="flex items-center gap-3 rounded-xl border border-[#e8eaf1] px-4 py-3"
                         >
-                          <FileText size={18} className="text-[#f36c21]" />
+                          {file.type.startsWith("image/") ? (
+                            <FileImage size={18} className="text-[#f36c21]" />
+                          ) : file.type.startsWith("video/") ? (
+                            <FileVideo size={18} className="text-[#f36c21]" />
+                          ) : (
+                            <FileText size={18} className="text-[#f36c21]" />
+                          )}
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-semibold">
                               {file.name}
