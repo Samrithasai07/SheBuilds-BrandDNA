@@ -10,14 +10,21 @@ button { cursor: pointer; }
 .field-label { color: #8b90a3; letter-spacing: .1em; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: spin 1s linear infinite; }
-.phase-tab { display: flex; min-height: 48px; flex: 1; align-items: center; justify-content: center; gap: .55rem; border-radius: .75rem; padding: .65rem .8rem; color: #697088; font-size: .92rem; font-weight: 800; transition: background .2s ease, color .2s ease, transform .2s ease; }
+.phase-tab { display: flex; min-height: 56px; flex: 1; align-items: center; justify-content: center; gap: .6rem; border: 1px solid #dfe3ee; border-radius: .85rem; padding: .75rem 1rem; color: #303a74; background: #f8f9fc; font-size: 1rem; font-weight: 800; transition: background .2s ease, color .2s ease, border-color .2s ease, transform .2s ease; }
 .phase-tab:hover { background: #f2f4f9; color: #202a68; transform: translateY(-1px); }
 .phase-tab span { display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: 999px; background: #eef0f6; font-size: .75rem; }
-.phase-tab-active { background: #202a68; color: white; }
+.phase-tab-active { border-color: #202a68; background: #202a68; color: white; box-shadow: 0 5px 14px rgba(32,42,104,.22); }
 .phase-tab-active:hover { background: #202a68; color: white; }
 .phase-tab-active span { background: rgba(255,255,255,.16); }
+.phase-tab:disabled { border-color: #e3e5ed; background: #f1f2f6; color: #8b90a2; cursor: not-allowed; opacity: .72; }
+.start-over-button { min-height: 48px; border: 2px solid #f36c21; border-radius: .8rem; background: white; padding: .65rem 1.1rem; color: #c94f0e; font-size: 1rem; font-weight: 800; box-shadow: 0 4px 12px rgba(243,108,33,.12); transition: background .2s ease, color .2s ease, transform .2s ease; }
+.start-over-button:hover { background: #f36c21; color: white; transform: translateY(-1px); }
+.phase-back-button { display: inline-flex; min-height: 48px; align-items: center; border: 2px solid #202a68; border-radius: .8rem; background: white; padding: .65rem 1rem; color: #202a68; font-size: 1rem; font-weight: 800; box-shadow: 0 4px 12px rgba(32,42,104,.1); transition: background .2s ease, color .2s ease; }
+.phase-back-button:hover { background: #202a68; color: white; }
+.space-y-7 > button:first-child { min-height: 48px; border: 2px solid #202a68; border-radius: .8rem; background: white; padding: .65rem 1rem; color: #202a68; font-size: 1rem; font-weight: 800; box-shadow: 0 4px 12px rgba(32,42,104,.1); }
+.space-y-7 > button:first-child:hover { background: #202a68; color: white; }
 .phase-view { animation: phase-in .32s ease both; }
 @keyframes phase-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse { 50% { opacity: .55; transform: scale(.96); } }
 .animate-pulse { animation: pulse 1.2s ease-in-out infinite; }
-@media (max-width: 640px) { body { font-size: 16px; } .phase-tab { font-size: 0; } .phase-tab span { font-size: .78rem; } }
+@media (max-width: 640px) { body { font-size: 16px; } .phase-tab { min-height: 64px; flex-direction: column; gap: .2rem; padding: .45rem .25rem; font-size: .72rem; line-height: 1.15; text-align: center; } .phase-tab span { width: 1.45rem; height: 1.45rem; font-size: .72rem; } .start-over-button { min-height: 44px; padding: .55rem .8rem; font-size: .9rem; } }

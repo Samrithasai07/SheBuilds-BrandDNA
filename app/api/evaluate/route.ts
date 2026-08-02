@@ -1,14 +1,32 @@
 import { z } from "zod";
-import { AuthenticityEngine, averageCosineSimilarity, BrandAlignmentEngine, EvidenceFusionEngine, OriginalityEngine, PolicyEngine, weightedCosineSimilarity } from "./scoring";
+import { PDFParse } from "pdf-parse";
+import { AuthenticityEngine, averageCosineSimilarity, BrandAlignmentEngine, calibrateSemanticRelevance, EvidenceFusionEngine, OriginalityEngine, PolicyEngine, weightedCosineSimilarity } from "./scoring";
 
 export const runtime = "nodejs";
 
 const schema=z.object({
-  content:z.string().trim().min(1).max(30_000),
+  content:z.string().trim().max(30_000),
   profile:z.object({name:z.string(),summary:z.string(),industry:z.string(),audience:z.string(),tone:z.array(z.string()),values:z.array(z.string()),vocabulary:z.array(z.string()),restricted:z.array(z.string())}),
   competitors:z.array(z.object({name:z.string(),url:z.string(),reason:z.string()})).max(12),
   evidenceChunks:z.array(z.string().max(1000)).max(8).optional()
 });
+
+const MAX_MEDIA_SIZE=50*1024*1024;
+async function evaluationInput(request:Request){
+  const type=request.headers.get("content-type")||"";
+  if(!type.includes("multipart/form-data"))return schema.safeParse(await request.json());
+  const form=await request.formData();
+  const files=form.getAll("files").filter((entry):entry is File=>typeof entry!=="string").slice(0,6);
+  let extracted="";
+  for(const file of files){
+    if(file.size>MAX_MEDIA_SIZE)return schema.safeParse({...Object.fromEntries(form),content:""});
+    if(file.type==="application/pdf"||file.name.toLowerCase().endsWith(".pdf")){
+      const parser=new PDFParse({data:new Uint8Array(await file.arrayBuffer())});
+      try{const parsed=await parser.getText();extracted+=`\n${parsed.text}`}finally{await parser.destroy()}
+    }
+  }
+  try{return schema.safeParse({content:`${String(form.get("content")||"")} ${extracted}`.trim().slice(0,30_000),profile:JSON.parse(String(form.get("profile")||"{}")),competitors:JSON.parse(String(form.get("competitors")||"[]")),evidenceChunks:JSON.parse(String(form.get("evidenceChunks")||"[]"))})}catch{return schema.safeParse({})}
+}
 
 const stop=new Set(["this","that","with","from","your","have","will","into","more","than","their","they","them","about","what","when","where","which","brand"]);
 function vector(text:string){const map=new Map<string,number>();for(const word of text.toLowerCase().match(/[a-z][a-z'-]{2,}/g)||[])if(!stop.has(word))map.set(word,(map.get(word)||0)+1);return map;}
@@ -41,9 +59,10 @@ async function semanticSimilarities(query:string,documents:string[]){if(!documen
 
 export async function POST(request:Request){
   try{
-    const parsed=schema.safeParse(await request.json());
+    const parsed=await evaluationInput(request);
     if(!parsed.success)return Response.json({error:"Add meaningful campaign content before evaluation."},{status:400});
     const {content,profile,competitors,evidenceChunks=[]}=parsed.data;
+    if(!content.trim())return Response.json({error:"Add campaign copy, a script/caption for image or video, or a PDF containing readable text."},{status:400});
     const qualityError=validateContentQuality(content);
     if(qualityError)return Response.json({error:qualityError,code:"INVALID_CONTENT_QUALITY"},{status:422});
     const brandId=profile.name.toLowerCase().replace(/[^a-z0-9]+/g,"-");
@@ -58,14 +77,14 @@ export async function POST(request:Request){
     const researchedCompetitors=await competitorEvidence(competitors);
     const competitorDocuments=researchedCompetitors.map(item=>item.evidence);
     const liveCompetitorScores=await semanticSimilarities(content,competitorDocuments);
-    const competitorMatches=researchedCompetitors.map((item,index)=>{const lexical=lexicalEvidence(content,[item.evidence]);const semantic=liveCompetitorScores[index]??cosine(content,item.evidence);return {...item,similarity:lexical.exact?100:pct((semantic*.75+lexical.coverage*.25)*100),matchType:lexical.exact?"exact source phrase":lexical.coverage>=.6?"strong wording overlap":"semantic overlap"}}).sort((a,b)=>b.similarity-a.similarity).slice(0,3);
+    const competitorMatches=researchedCompetitors.map((item,index)=>{const lexical=lexicalEvidence(content,[item.evidence]);const semantic=liveCompetitorScores[index]??cosine(content,item.evidence);const similarity=lexical.exact?100:pct(calibrateSemanticRelevance(semantic)*100);return {...item,similarity,rawSimilarity:pct(semantic*100),evidenceExcerpt:item.evidence.slice(0,260),matchType:lexical.exact?"exact source phrase":similarity>=55?"meaningful semantic overlap":similarity>=20?"limited semantic overlap":"no meaningful overlap"}}).sort((a,b)=>b.similarity-a.similarity).slice(0,3);
     const clichéMatches=cliches.filter(phrase=>content.toLowerCase().includes(phrase));
     const contentWords=content.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g)||[];
     const preferred=profile.vocabulary.filter(word=>content.toLowerCase().includes(word.toLowerCase()));
     const hasLegal=/\b(terms apply|conditions apply|t&c|disclaimer)\b/i.test(content);
     const policyApplicable=profile.restricted.length>0;
     const brandAlignment=new BrandAlignmentEngine().evaluate(semanticBrand.map(hit=>hit.score));
-    const originality=new OriginalityEngine().evaluate(semanticCompetitors.map(hit=>hit.score));
+    const originality=new OriginalityEngine().evaluate(liveCompetitorScores);
     const authenticity=new AuthenticityEngine().evaluate(semanticAiPhrases.map(hit=>hit.score));
     const policyResult=new PolicyEngine().evaluate(content,profile.restricted);
     const policy=policyResult.score;
@@ -83,7 +102,7 @@ export async function POST(request:Request){
       },
       cosine:{brandAverage:averageCosineSimilarity(semanticBrand.map(hit=>hit.score)),brandRankWeighted:weightedCosineSimilarity(semanticBrand.map(hit=>hit.score))},
       normalizedScores:scoreSet,
-      fusion:{weights:EvidenceFusionEngine.weights,final:total},
+      fusion:{weights:EvidenceFusionEngine.weights,alignmentEligibility:brandAlignment/100,final:total},
     }));
     const rivalSimilarity=competitorMatches[0]?.similarity||0;
     const uniqueWords=new Set(contentWords).size;
@@ -96,6 +115,6 @@ export async function POST(request:Request){
     if(originality>=70)strengths.push("Competitor evidence has limited semantic overlap with this copy.");else{weaknesses.push(`Closest overlap is ${competitorMatches[0]?.name||"a competitor"} at ${rivalSimilarity}%.`);improvements.push("Replace shared category claims with a concrete proprietary benefit or proof point.")}
     if(clichéMatches.length){weaknesses.push(`Generic phrases detected: ${clichéMatches.join(", ")}.`);improvements.push("Replace generic motivational language with a specific action, product feature, or customer outcome.")}else strengths.push("No exact matches to the explainable AI-cliché library.");
     if(forbidden.length){weaknesses.push(`Restricted terms used: ${forbidden.join(", ")}.`);improvements.push(`Remove or rewrite: ${forbidden.join(", ")}.`)}
-    return Response.json({total,weights,confidence,scores:scoreSet,brand_alignment:brandAlignment,originality,authenticity,policy,brand_distinctiveness:total,evidence:{brandMatchType:brandLexical.exact?"exact source phrase":brandLexical.coverage>=.6?"strong wording overlap":"semantic overlap",brandLexicalCoverage:pct(brandLexical.coverage*100),brandMatches,competitorMatches,clicheMatches:clichéMatches,policy:{applicable:policyApplicable,forbidden,preferred,legalTextDetected:hasLegal}},insight:{strengths,weaknesses,improvements},method:"Scores are computed deterministically from retrieved evidence: mean Top-K cosine similarity for brand alignment, inverse mean Top-K cosine similarity for originality and authenticity, rule-only policy checks, then fixed 35/30/20/15 evidence fusion. Explanation evidence does not modify scores."});
-  }catch{return Response.json({error:"The content could not be evaluated."},{status:400})}
+    return Response.json({total,weights,confidence,scores:scoreSet,brand_alignment:brandAlignment,originality,authenticity,policy,brand_distinctiveness:total,evidence:{brandMatchType:brandLexical.exact?"exact source phrase":brandLexical.coverage>=.6?"strong wording overlap":"semantic overlap",brandLexicalCoverage:pct(brandLexical.coverage*100),brandMatches,competitorMatches,clicheMatches:clichéMatches,policy:{applicable:policyApplicable,forbidden,preferred,legalTextDetected:hasLegal}},insight:{strengths,weaknesses,improvements},method:"The submitted idea is embedded once and compared with current competitor messaging using the same BGE model. Raw cosine values are calibrated to remove the unrelated-text baseline; Originality is the inverse of calibrated competitor overlap. Brand alignment remains a separate eligibility check, while explanations never modify scores."});
+  }catch(error){console.error("[BrandDNA evaluation error]",error);return Response.json({error:"The content could not be evaluated."},{status:400})}
 }

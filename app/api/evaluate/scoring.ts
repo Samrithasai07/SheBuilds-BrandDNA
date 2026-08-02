@@ -59,14 +59,14 @@ export class BrandAlignmentEngine {
 
 export class OriginalityEngine {
   evaluate(similarities: readonly number[]) {
-    if (similarities.length === 0) return 0;
+    if (similarities.length === 0) return 100;
     return Math.round(clamp(100 - calibrateSemanticRelevance(weightedCosineSimilarity(similarities)) * 100));
   }
 }
 
 export class AuthenticityEngine {
   evaluate(similarities: readonly number[]) {
-    if (similarities.length === 0) return 0;
+    if (similarities.length === 0) return 100;
     return Math.round(clamp(100 - calibrateSemanticRelevance(weightedCosineSimilarity(similarities)) * 100));
   }
 }
@@ -76,7 +76,7 @@ export class PolicyEngine {
     const normalizedContent = content.toLocaleLowerCase();
     const rules = [...new Set(forbiddenWords.map((word) => word.trim()).filter(Boolean))];
     const forbidden = rules.filter((word) => normalizedContent.includes(word.toLocaleLowerCase()));
-    const score = rules.length === 0 ? 0 : Math.round(clamp(100 - (forbidden.length / rules.length) * 100));
+    const score = rules.length === 0 ? 100 : Math.round(clamp(100 - (forbidden.length / rules.length) * 100));
     return { score, forbidden };
   }
 }
@@ -91,11 +91,16 @@ export class EvidenceFusionEngine {
 
   evaluate(scores: EvaluationScores) {
     const { weights } = EvidenceFusionEngine;
-    return Math.round(clamp(
+    const weightedScore = clamp(
       scores.brandAlignment * weights.brandAlignment +
       scores.originality * weights.originality +
       scores.authenticity * weights.authenticity +
       scores.policy * weights.policy,
-    ));
+    );
+    // Distinctiveness is conditional on belonging to the brand. This continuous
+    // gate preserves the component weights while preventing unrelated content
+    // from scoring highly on originality/authenticity/policy alone.
+    const alignmentEligibility = clamp(scores.brandAlignment, 0, 100) / 100;
+    return Math.round(weightedScore * alignmentEligibility);
   }
 }
